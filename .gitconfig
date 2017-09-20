@@ -1,0 +1,19 @@
+filter.media.required=true
+filter.media.clean=git media clean %f
+filter.media.smudge=git media smudge %f
+user.name=Carl Vitullo
+user.email=carl.vitullo@gmail.com
+push.default=simple
+filter.hawser.clean=git hawser clean %f
+filter.hawser.smudge=git hawser smudge %f
+filter.hawser.required=true
+filter.lfs.clean=git lfs clean %f
+filter.lfs.smudge=git lfs smudge %f
+filter.lfs.required=true
+alias.lg=log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+alias.cob=checkout -b
+alias.co=checkout
+alias.col=checkout -
+alias.com=checkout master
+core.editor=subl -n -w
+rebase.autosquash=true
