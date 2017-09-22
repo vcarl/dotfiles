@@ -16,5 +16,6 @@ alias.co=checkout
 alias.col=checkout -
 alias.com=checkout master
 alias.fixup=commit --fixup
+branch.master.mergeoptions=--no-ff
 core.editor=subl -n -w
 rebase.autosquash=true
