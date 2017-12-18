@@ -14,6 +14,8 @@ Not technically "dot" files, but configuration (etc) files that are helpful when
 * [ ] `git clone git@github.com:vcarl/dotfiles.git`
 * [ ] `cp -r dotfiles/fish/* ~/.config/fish`
 * [ ] Import iterm color scheme
+* [ ] `cp dotfiles/iterm.profile ~/Library/Application\ Support/iTerm2/DynamicProfiles/`
+* [ ] Enable Iterm hotkey window
 * [ ] Install node LTS https://nodejs.org/en/download/
 * [ ] Install VS Code https://code.visualstudio.com/download
     * [ ] Install Sublime keymap
