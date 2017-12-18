@@ -1,21 +1,32 @@
-filter.media.required=true
-filter.media.clean=git media clean %f
-filter.media.smudge=git media smudge %f
-user.name=Carl Vitullo
-user.email=carl.vitullo@gmail.com
-push.default=simple
-filter.hawser.clean=git hawser clean %f
-filter.hawser.smudge=git hawser smudge %f
-filter.hawser.required=true
-filter.lfs.clean=git lfs clean %f
-filter.lfs.smudge=git lfs smudge %f
-filter.lfs.required=true
-alias.lg=log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
-alias.cob=checkout -b
-alias.co=checkout
-alias.col=checkout -
-alias.com=checkout master
-alias.fixup=commit --fixup
-branch.master.mergeoptions=--no-ff
-core.editor=subl -n -w
-rebase.autosquash=true
+[filter]
+	[media]
+		required=true
+		clean=git media clean %f
+		smudge=git media smudge %f
+	[hawser]
+		clean=git hawser clean %f
+		smudge=git hawser smudge %f
+		required=true
+	[lfs]
+		clean=git lfs clean %f
+		smudge=git lfs smudge %f
+[user]
+	name=Carl Vitullo
+	email=carl.vitullo@gmail.com
+[push]
+	default=simple
+[alias]
+	lg=log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+	cob=checkout -b
+	co=checkout
+	col=checkout -
+	com=checkout master
+	fixup=commit --fixup
+
+[branch]
+	[master]
+		mergeoptions=--no-ff
+[core]
+	editor=subl -n -w
+[rebase]
+	autosquash=true
