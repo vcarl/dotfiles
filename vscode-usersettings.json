@@ -1,0 +1,27 @@
+{
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true
+  },
+  "editor.formatOnSave": true,
+  "editor.tabSize": 2,
+  "window.zoomLevel": 0,
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "emmet.showExpandedAbbreviation": "never",
+  "prettier.tabWidth": 2,
+  "html.format.endWithNewline": true,
+  "editor.wordWrap": "wordWrapColumn",
+  "sublimeTextKeymap.promptV3Features": true,
+  "editor.multiCursorModifier": "ctrlCmd",
+  "editor.snippetSuggestions": "top",
+  "editor.formatOnPaste": true,
+  "explorer.confirmDragAndDrop": false,
+  "explorer.confirmDelete": false,
+  "[markdown]": {
+    "editor.wordWrap": "wordWrapColumn"
+  }
+}
