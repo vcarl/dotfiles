@@ -7,18 +7,22 @@ Not technically "dot" files, but configuration (etc) files that are helpful when
 * [ ] Download Iterm2 https://www.iterm2.com/downloads.html
 * [ ] Install Homebrew https://brew.sh/
 * [ ] `brew install fish`
-    * [ ] `sudo vi /etc/shells` and add fish's full path (`which fish`)
+    * [ ] `which fish`
+    * [ ] `sudo vi /etc/shells` and add fish's full path
     * [ ] `chsh -s /usr/local/bin/fish`
 * [ ] `brew install git`
-* [ ] Set up GitHub SSH key
+* [ ] `brew install yarn`
+* [ ] Set up SSH key for GitHub, `ssh-keygen -t rsa -b 4096 -C 'carl.vitullo@gmail.com'`
 * [ ] `git clone git@github.com:vcarl/dotfiles.git`
 * [ ] `cp -r dotfiles/fish/* ~/.config/fish`
-* [ ] Import iterm color scheme
+* [ ] Import iterm color scheme (Profile > colors > color presets > import)
 * [ ] `cp dotfiles/iterm.profile ~/Library/Application\ Support/iTerm2/DynamicProfiles/`
 * [ ] Enable Iterm hotkey window
 * [ ] Install node LTS https://nodejs.org/en/download/
 * [ ] Install VS Code https://code.visualstudio.com/download
     * [ ] Install Sublime keymap
+* [ ] Install Sublime Text https://www.sublimetext.com/3
+    * [ ] `ln -s /Applications/Sublime\ Text.app/Contents/SharedSupport/bin/subl /usr/local/bin/subl`
 * [ ] OSX settings:
     * [ ] Medium click, silent clicking.  No tap to click.
     * [ ] No natural scrolling, 3 finger swipe between pages, 4 finger between screens. No Notification Center or Launchpad
