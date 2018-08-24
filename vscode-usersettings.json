@@ -38,7 +38,7 @@
   "jake.autoDetect": "off",
   "javascript.autoClosingTags": false,
   "javascript.format.enable": false,
-  "json.format.enable": false
+  "json.format.enable": false,
   "prettier.tabWidth": 2,
   "typescript.tsdk": "node_modules/typescript/lib",
   "window.zoomLevel": 0,
