@@ -8,8 +8,10 @@
 		smudge=git hawser smudge %f
 		required=true
 	[lfs]
-		clean=git lfs clean %f
-		smudge=git lfs smudge %f
+		clean=git lfs clean -- %f
+		smudge=git lfs smudge -- %f
+		process=git-lfs filter-process
+		required=true
 [user]
 	name=Carl Vitullo
 	email=carl.vitullo@gmail.com
@@ -23,6 +25,10 @@
 	com=checkout master
 	fixup=commit --fixup
 	hh=reset --hard head^
+	rhm=reset --hard origin/master
+	wip=commit -m 'WIP' --no-verify
+	cm=commit -m
+
 
 [branch]
 	[master]
@@ -31,3 +37,5 @@
 	editor=subl -n -w
 [rebase]
 	autosquash=true
+[pull]
+	ff = only
