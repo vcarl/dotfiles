@@ -1,18 +1,17 @@
 {
-  "always_show_minimap_viewport": true,
-  "default_line_ending": "system",
-  "draw_minimap_border": true,
-  "draw_white_space": "all",
-  "ensure_newline_at_eof_on_save": true,
-  "font_size": 12,
-  "highlight_modified_tabs": true,
   "ignored_packages":
   [
-    "Vintage"
+    "Vintage",
   ],
-  "scroll_past_end": true,
   "tab_size": 2,
+  "font_size": 12,
+  "use_tab_stops": true,
   "translate_tabs_to_spaces": true,
-  "trim_trailing_white_space_on_save": true,
-  "use_tab_stops": true
+  "draw_white_space": "all",
+  "always_show_minimap_viewport": true,
+  "draw_minimap_border": true,
+  "scroll_past_end": true,
+  "highlight_modified_tabs": true,
+  "ensure_newline_at_eof_on_save": true,
+  "trim_trailing_white_space_on_save": true
 }
