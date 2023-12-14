@@ -11,20 +11,17 @@ Not technically "dot" files, but configuration (etc) files that are helpful when
    * [ ] `sudo vi /etc/shells` and add fish's full path
    * [ ] `chsh -s /usr/local/bin/fish`
    * [ ] `curl https://git.io/fisher --create-dirs -sLo ~/.config/fish/functions/fisher.fish` install fisher manager
-* [ ] (install nvm)
-   * [ ] `fisher add FabioAntunes/fish-nvm`
-   * [ ] `fisher add edc/bass`
-   * [ ] `nvm install --lts 10`
-   * [ ] `nvm install 12`
-   * [ ] `nvm install 8`
-   * [ ] `nvm install 6`
+* [ ] Install nvm https://github.com/nvm-sh/nvm
+   * [ ] `fisher install FabioAntunes/fish-nvm edc/bass`
+   * [ ] `nvm install --lts`
 * [ ] `brew install git`
-* [ ] `brew install yarn`
+* [ ] [https://pnpm.io/cli/install](https://pnpm.io/installation)
 * [ ] Set up SSH key for GitHub, `ssh-keygen -t rsa -b 4096 -C 'carl.vitullo@gmail.com'`
 * [ ] `git clone git@github.com:vcarl/dotfiles.git`
 * [ ] `cp -r dotfiles/fish/* ~/.config/fish`
 * [ ] Import iterm color scheme (Profile > colors > color presets > import)
-* [ ] `cp dotfiles/iterm.profile ~/Library/Application\ Support/iTerm2/DynamicProfiles/`
+* [ ] `
+/`
 * [ ] Enable Iterm hotkey window
 * [ ] Install node LTS https://nodejs.org/en/download/
 * [ ] Install VS Code https://code.visualstudio.com/download
@@ -45,3 +42,4 @@ Not technically "dot" files, but configuration (etc) files that are helpful when
 http://fishshell.com/docs/current/tutorial.html#tut_functions
 
 They live in `~/.config/`. `export.fish` adds a bash-style export, so scripts are more likely to work correctly.
+
