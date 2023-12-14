@@ -19,13 +19,15 @@
 	default=simple
 [alias]
 	lg=log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+	logme=!git log --pretty=format:\"* %s\" --author `git config user.email`
 	cob=checkout -b
 	co=checkout
 	col=checkout -
-	com=checkout master
+	com=checkout main
 	fixup=commit --fixup
-	hh=reset --hard head^
-	rhm=reset --hard origin/master
+	unwip=reset head^
+	rh=reset --hard
+	rhm=reset --hard origin/main
 	wip=commit -m 'WIP' --no-verify
 	cm=commit -m
 
@@ -33,9 +35,16 @@
 [branch]
 	[master]
 		mergeoptions=--no-ff
+	[main]
+		mergeoptions=--no-ff
 [core]
 	editor=subl -n -w
 [rebase]
 	autosquash=true
 [pull]
 	ff = only
+[init]
+	defaultBranch = main
+
+
+
