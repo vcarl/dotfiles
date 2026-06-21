@@ -1,0 +1,14 @@
+{
+  "name": "vcarl-setup",
+  "owner": {
+    "name": "Carl Vitullo",
+    "email": "carl.vitullo@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "project-setup",
+      "source": "./plugin",
+      "description": "New-project setup process. Skills that stand up new projects on a blessed, agent-first path."
+    }
+  ]
+}

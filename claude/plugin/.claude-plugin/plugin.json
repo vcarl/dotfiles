@@ -1,0 +1,9 @@
+{
+  "name": "project-setup",
+  "version": "0.1.0",
+  "description": "Carl's new-project setup process. Skills that stand up new projects on a blessed, agent-first path.",
+  "author": {
+    "name": "Carl Vitullo",
+    "email": "carl.vitullo@gmail.com"
+  }
+}
