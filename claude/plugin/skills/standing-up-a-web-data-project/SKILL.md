@@ -41,6 +41,8 @@ The chain is **DB-first**. Exactly three artifacts are hand-authored; every othe
 
 Each generation step is a task-graph target gated on its upstream (`^build`), never a manual command. The proof the chain works: change a migration and a type error surfaces in the client **in the same PR** — no step in between requires a human to remember anything.
 
+**Lint the generated spec.** The OpenAPI artifact (layer 5) is the one chain output no human reads, so run a **Spectral** ruleset over it as a task-graph step: unreferenced components, missing operation ids, `additionalProperties` foot-guns (the class of defect where a strict validator rejects a valid response because the schema omits a field the server really returns). Custom Spectral rules are also a second enforcement home for hint conventions — "every `x-display` references only real properties" can be a Spectral rule alongside the guard test.
+
 ### Hints: affordances ride the spec
 
 Server-authored hints tell a generated client what a value *is* and what it can *do next*. Reference implementation: `~/workspace/gameserver` (Go producer; `internal/openapi/schema_registry.go`) with TypeScript consumer `~/workspace/spacemolt-lib`. The rules that port:
@@ -68,7 +70,7 @@ Distilled from the house style across the reference implementations plus current
 | Styling | **Design tokens + a small component library** | An agent-first design system. Not ad-hoc Tailwind class soup — it can't hold consistency at scale. A `tokens.css` + components layer is the seam. |
 | DB + types | SQLite or Postgres + **Kysely, codegen'd types** | Migrations are the root of **The generation chain** (above); DB types are generated (`kysely-codegen`), never authored. Drizzle is acceptable only if its codegen covers the chain equally. |
 | Package manager | **pnpm** | `packageManager` field pinned; `pnpm-workspace.yaml` for monorepos. |
-| Build / lint / test | **Vite 7, Biome, Vitest** + **`@effect/language-service`** | Biome stays blessed for formatting/syntax. The language-service is a TS-language-service plugin, not a linter — it type-checks Effect usage (floating effects, sync-in-`gen`, unsafe assertions, etc.), so it's orthogonal to Biome, not a replacement. It's editor-only until its `patch` command is run to make `tsc` itself emit the diagnostics (see scaffold checklist). `@effect/eslint-plugin` is effectively dead — don't reach for it. The moment a custom *type-aware* rule is needed, ESLint + typescript-eslint comes back too: neither Biome nor oxlint can host type-aware rules. Fail-fast config loading: decode all config at startup so bad input surfaces before work begins. |
+| Build / lint / test | **Vite 7, Biome, Vitest** + **`@effect/language-service`** | Biome stays blessed for formatting/syntax. The language-service is a TS-language-service plugin, not a linter — it type-checks Effect usage (floating effects, sync-in-`gen`, unsafe assertions, etc.), so it's orthogonal to Biome, not a replacement. It's editor-only until its `patch` command is run to make `tsc` itself emit the diagnostics (see scaffold checklist). `@effect/eslint-plugin` is effectively dead — don't reach for it. Custom *syntactic* bans (banned imports, banned call patterns) live in **Biome GritQL plugins** — don't resurrect ESLint for those. The moment a custom *type-aware* rule is needed, ESLint + typescript-eslint comes back too — and only then: neither Biome nor oxlint can host type-aware rules. Fail-fast config loading: decode all config at startup so bad input surfaces before work begins. |
 | Deploy | **Cloudflare or Vercel** | Edge-managed. Other hosts have weird missing features. |
 
 ### Two patterns worth wiring early
@@ -141,6 +143,7 @@ These are what make the reference projects pleasant to work in:
 - **Pre-commit that only touches staged files** — format staged files, re-stage only those, leave unstaged edits untouched.
 - **`@effect/language-service` at error severity enforces the discipline off-the-shelf** — `floatingEffect`, `tryCatchInEffectGen`, `asyncFunction`, `newPromise`, and the `*InEffect`-scoped global bans (`globalConsoleInEffect`, `globalFetchInEffect`, etc. — prefer these over their unscoped twins, far better signal) so the Effect error channel is actually used. Don't hand-roll this as an ESLint ban list.
 - **Immutable, resumable data writes** — header-open → append → finalize-once, so an interrupted run is detectable and never corrupts.
+- **A CI infra-lint job** — `shellcheck` on every script (the ergonomic launcher included) and `hadolint` on every Dockerfile. Minutes to wire; catches the "worked locally, broke in the container" class before it ships.
 
 ## Anti-patterns to design AWAY (learned the hard way)
 
