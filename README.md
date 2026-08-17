@@ -11,9 +11,10 @@ Not technically "dot" files, but configuration (etc) files that are helpful when
    * [ ] `sudo vi /etc/shells` and add fish's full path
    * [ ] `chsh -s /usr/local/bin/fish`
    * [ ] `curl https://git.io/fisher --create-dirs -sLo ~/.config/fish/functions/fisher.fish` install fisher manager
-* [ ] Install nvm https://github.com/nvm-sh/nvm
-   * [ ] `fisher install FabioAntunes/fish-nvm edc/bass`
-   * [ ] `nvm install --lts`
+* [ ] Install fnm https://github.com/Schniz/fnm
+   * [ ] `brew install fnm`
+   * [ ] `echo 'fnm env --use-on-cd | source' >> ~/.config/fish/config.fish`
+   * [ ] `fnm install --lts`
 * [ ] `brew install git`
 * [ ] [https://pnpm.io/cli/install](https://pnpm.io/installation)
 * [ ] Set up SSH key for GitHub, `ssh-keygen -t rsa -b 4096 -C 'carl.vitullo@gmail.com'`
