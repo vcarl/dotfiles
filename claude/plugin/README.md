@@ -13,3 +13,5 @@ new projects on a blessed, agent-first path. First skill:
 
 - `.claude-plugin/plugin.json` — plugin manifest
 - `skills/standing-up-a-web-data-project/SKILL.md` — the setup skill
+- `skills/standing-up-a-web-data-project/templates/` — files copied into a scaffolded project
+  (`effect-conventions.md` + `effect/` code stubs, distilled from `roci`)
