@@ -71,11 +71,33 @@ Distilled from the house style across the reference implementations plus current
 | DB + types | SQLite or Postgres + **Kysely, codegen'd types** | Migrations are the root of **The generation chain** (above); DB types are generated (`kysely-codegen`), never authored. Drizzle is acceptable only if its codegen covers the chain equally. |
 | Package manager | **pnpm** | `packageManager` field pinned; `pnpm-workspace.yaml` for monorepos. |
 | Build / lint / test | **Vite 7, Biome, Vitest** + **`@effect/language-service`** | Biome stays blessed for formatting/syntax. The language-service is a TS-language-service plugin, not a linter — it type-checks Effect usage (floating effects, sync-in-`gen`, unsafe assertions, etc.), so it's orthogonal to Biome, not a replacement. It's editor-only until its `patch` command is run to make `tsc` itself emit the diagnostics (see scaffold checklist). `@effect/eslint-plugin` is effectively dead — don't reach for it. Custom *syntactic* bans (banned imports, banned call patterns) live in **Biome GritQL plugins** — don't resurrect ESLint for those. The moment a custom *type-aware* rule is needed, ESLint + typescript-eslint comes back too — and only then: neither Biome nor oxlint can host type-aware rules. Fail-fast config loading: decode all config at startup so bad input surfaces before work begins. |
+| E2E / smoke browser | **`Bun.WebView`** (Bun 1.4+), run under `bun` | The blessed driver for the QA skill's "is it basically functional" pass. Native event dispatch (`isTrusted: true`), `evaluate()`, `screenshot()`, built-in wait-for-actionability. On macOS it's the system WKWebView — zero install. Marked **experimental**; see the tooling-runtime section for the boundary and the Playwright escape hatch. |
+| Image / asset pipeline | **`Bun.Image`** (Bun 1.4+) | Replaces `sharp` for build-time asset work — resize/rotate/modulate, `metadata()` without a full decode, `placeholder()` for ThumbHash blur-ups. Zero npm deps, no native addon build step. |
+| PTY / terminal harness | **`Bun.Terminal`** (Bun 1.3.5+) | Replaces `node-pty` for driving the ergonomic launcher, TUIs, or any subprocess that needs a real TTY. No native addon, so no ABI break on every Node bump. POSIX only. |
 | Deploy | **Cloudflare or Vercel** | Edge-managed. Other hosts have weird missing features. |
 
 ### Two patterns worth wiring early
 - **Route-as-drawer**: a drawer/side-panel should be expressible as a route ("here's a route, render it as a drawer") with state handled by the router. Hack the router to fit this; don't reinvent panel state.
 - **One read/write data module**: all reads and writes go through a single data layer with stable, client-generated entity IDs (ULID/UUID). Never raw-`fetch` in components. This is what makes the sync engine swappable.
+
+## Bun as the tooling runtime
+
+`Bun.Image`, `Bun.WebView`, and `Bun.Terminal` are **runtime APIs, not npm packages** — a Node process cannot import them. Adopting them is therefore a decision about which *processes* run under Bun, not about adding a dependency. The boundary:
+
+> **Bun runs standalone tooling processes. Node runs the app and the generation chain.**
+
+Tooling = e2e/smoke scripts, the asset pipeline, PTY harnesses, one-off maintenance scripts. These are already separate processes that don't share a module graph with the app, so the second runtime costs nothing but a `bun` on the PATH — pin it (`.tool-versions` / `mise.toml`) the same way Node is pinned.
+
+**Do not swap `pnpm install` for `bun install`, and do not move the app runtime to Bun.** The monorepo section below leans on pnpm catalogs, `workspace:` symlinks, and Nx; Bun's workspace story doesn't cover catalogs equivalently. Three tooling APIs don't justify reopening that.
+
+### What each one buys, and what it costs
+
+- **`Bun.WebView` → the QA skill's browser.** The factory conventions below have always asked for a QA skill that proves the webapp renders, without naming a tool to do it. This is that tool. Sequential-only (`await` every call; concurrent ops on one slot throw `ERR_INVALID_STATE`), and the Chrome backend can't run inside a Worker.
+  - **It is experimental and may change.** Accepted deliberately: the blast radius is a tooling script breaking on a Bun upgrade, never a production outage. **Reach for Playwright instead** when you need a cross-browser matrix, trace viewer/time-travel debugging, or a suite whose breakage would block releases.
+  - **Zero-install is macOS-only.** macOS uses the system WKWebView; Linux and Windows still need Chrome, Chromium, Edge, Brave, or Playwright's `chrome-headless-shell` present. Budget that in CI — it is not a dependency-free e2e story on Linux runners.
+- **`Bun.Image` → the asset pipeline.** Chain transforms, encode, `write()`; nothing executes until awaited. `Bun.serve` integration sets Content-Type automatically.
+  - **Pin the pipeline to JPEG/PNG/WebP if CI is Linux.** HEIC and AVIF are unavailable on Linux entirely, and AVIF *encode* on macOS needs an M3+. A pipeline that emits AVIF on a dev's Mac and silently can't in CI is the exact "worked locally, broke in the container" class the infra-lint job exists to catch — so assert the output format in a test, don't assume it.
+- **`Bun.Terminal` → TTY harnesses.** `write()`, `resize()`, `setRawMode()`, `ref()`/`unref()`, `close()`; also available as the `terminal` option to `Bun.spawn()`. **POSIX only — no Windows.** Fine for this stack (macOS dev, Linux CI); a blocker if a Windows contributor must run the suite.
 
 ## Monorepo structure
 
@@ -138,8 +160,8 @@ Internal `packages/*` and `services/*` stay `"private": true` with no version nu
 
 These are what make the reference projects pleasant to work in:
 
-- **A per-project `.claude/skills/` QA skill** that stands up the app cold and confirms it's "basically functional" — the surface real unit tests mock out (CLI/server boots, config resolves, data round-trips, the webapp renders). Author this skill alongside the app, not after.
-- **An ergonomic launcher** (`./bench`-style executable) instead of long `npm run` paths.
+- **A per-project `.claude/skills/` QA skill** that stands up the app cold and confirms it's "basically functional" — the surface real unit tests mock out (CLI/server boots, config resolves, data round-trips, the webapp renders). Author this skill alongside the app, not after. The "webapp renders" half is a `Bun.WebView` script run under `bun` (see **Bun as the tooling runtime**): navigate, `evaluate()` a couple of assertions, `screenshot()` for the diff. Keep it a separate process from the Vitest suite — it's a different runtime.
+- **An ergonomic launcher** (`./bench`-style executable) instead of long `npm run` paths. If it drives anything interactive, `Bun.Terminal` gives it a real TTY without a native addon.
 - **Pre-commit that only touches staged files** — format staged files, re-stage only those, leave unstaged edits untouched.
 - **`@effect/language-service` at error severity enforces the discipline off-the-shelf** — `floatingEffect`, `tryCatchInEffectGen`, `asyncFunction`, `newPromise`, and the `*InEffect`-scoped global bans (`globalConsoleInEffect`, `globalFetchInEffect`, etc. — prefer these over their unscoped twins, far better signal) so the Effect error channel is actually used. Don't hand-roll this as an ESLint ban list.
 - **Immutable, resumable data writes** — header-open → append → finalize-once, so an interrupted run is detectable and never corrupts.
@@ -164,7 +186,7 @@ These are what make the reference projects pleasant to work in:
 5. Choose and integrate the **sync engine** (Zero default); build the single data module with client-generated IDs.
 6. Decide the **streaming transport**; wire the one blessed path.
 7. Lay down **design tokens + component lib**; typed URL search-param state.
-8. Add the **`.claude/skills/` QA skill** and an **ergonomic launcher**.
+8. Add the **`.claude/skills/` QA skill** and an **ergonomic launcher**. Pin **Bun** alongside Node (`.tool-versions`/`mise.toml`) and write the tooling-runtime boundary into `CLAUDE.md`: Bun for standalone tooling processes, Node for the app and the chain. Drive the QA skill's browser pass with `Bun.WebView`; if CI is Linux, install `chrome-headless-shell` in the runner and assert the asset pipeline's output format (no HEIC/AVIF on Linux).
 9. Wire **Cloudflare/Vercel** deploy.
 10. Write the day-1 decisions and HMR/process boundaries into the project's `CLAUDE.md`.
 
