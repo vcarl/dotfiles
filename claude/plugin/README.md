@@ -1,8 +1,8 @@
 # project-setup
 
 A Claude Code plugin holding my new-project setup process — skills that stand up
-new projects on a blessed, agent-first path. First skill:
-`standing-up-a-web-data-project`.
+new projects on a blessed, agent-first path. The web-data-project skill now lives in its own
+plugin: [vcarl/new-project](https://github.com/vcarl/new-project).
 
 ## Enable
 
@@ -12,6 +12,4 @@ new projects on a blessed, agent-first path. First skill:
 ## Layout
 
 - `.claude-plugin/plugin.json` — plugin manifest
-- `skills/standing-up-a-web-data-project/SKILL.md` — the setup skill
-- `skills/standing-up-a-web-data-project/templates/` — files copied into a scaffolded project
-  (`effect-conventions.md` + `effect/` code stubs, distilled from `roci`)
+- `skills/standing-up-a-home-cluster-service/` — home-cluster service setup skill
