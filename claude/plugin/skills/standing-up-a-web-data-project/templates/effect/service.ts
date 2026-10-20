@@ -1,7 +1,7 @@
-// Canonical Effect service: a Context.Tag class + a Layer implementation.
+// Canonical Effect service (Effect 4): a Context.Service class + a Layer implementation.
 // Copy into src/, rename `Greeter` → your service, and replace the method(s).
 //
-// House style (see ../effect-conventions.md):
+// Conventions (see ../effect-conventions.md):
 //   - The service is an interface of `readonly` methods, each returning an Effect.
 //   - Consumers depend on the TAG, never on this concrete module.
 //   - `Layer.succeed` for a static impl; `Layer.effect` when building the impl
@@ -14,12 +14,12 @@ export interface Greeting {
   readonly text: string
 }
 
-export class Greeter extends Context.Tag("Greeter")<
+export class Greeter extends Context.Service<
   Greeter,
   {
     readonly greet: (name: string) => Effect.Effect<Greeting, GreeterError>
   }
->() {}
+>()("Greeter") {}
 
 // --- Implementation -------------------------------------------------------
 

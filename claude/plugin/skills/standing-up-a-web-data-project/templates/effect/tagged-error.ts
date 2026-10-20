@@ -1,46 +1,34 @@
-// Canonical tagged error: a typed value in the Effect error channel — never a `throw`.
+// Canonical tagged error (Effect 4): a typed value in the Effect error channel — never a `throw`.
 // Copy into src/, rename `GreeterError`, and replace the fields.
 //
-// House style (see ../effect-conventions.md):
-//   - `readonly _tag` literal identifies the error in a union.
-//   - A descriptive `message` getter formats full operator-readable context.
-//   - Optional `cause` carries the originating error so it is never lost.
-//   - Fail-fast and loud: a missing/unreachable dependency is a config/ops error.
+// See ../effect-conventions.md:
+//   - `Schema.TaggedError` is the default: `_tag` is populated automatically, the class
+//     extends `Error` (stack traces, readable `Cause` output), it is yieldable
+//     (`yield* new GreeterError(...)` fails the Effect), and it is a Schema — so it can be
+//     an `HttpApiEndpoint` error directly and round-trips over the wire.
+//   - `httpApiStatus` sets the HTTP status when the error is returned from an endpoint.
+//   - Override `message` only when formatting the fields adds operator context.
+//   - `cause` carries the originating error so it is never lost.
 
-export interface GreeterErrorFields {
-  readonly reason: string
-  readonly input: string
-  readonly cause?: unknown
-}
+import { Schema } from "effect"
 
-export class GreeterError {
-  readonly _tag = "GreeterError"
-  readonly reason: string
-  readonly input: string
-  readonly cause?: unknown
-
-  constructor(fields: GreeterErrorFields) {
-    this.reason = fields.reason
-    this.input = fields.input
-    this.cause = fields.cause
-  }
-
-  get message(): string {
+export class GreeterError extends Schema.TaggedError<GreeterError>()(
+  "GreeterError",
+  {
+    reason: Schema.String,
+    input: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+  { httpApiStatus: 422 },
+) {
+  override get message(): string {
     return `Greeter failed [input=${JSON.stringify(this.input)}]: ${this.reason}`
   }
-
-  toString(): string {
-    return this.message
-  }
 }
 
-// Terser alternative when you don't need a custom message:
+// Internal-only error that never crosses a serialization boundary (no Schema needed):
 //
 //   import { Data } from "effect"
-//   export class GreeterError extends Data.TaggedError("GreeterError")<{
-//     readonly reason: string
-//     readonly input: string
-//     readonly cause?: unknown
+//   export class CacheMiss extends Data.TaggedError("CacheMiss")<{
+//     readonly key: string
 //   }> {}
-//
-// Prefer the hand-written form above whenever the message benefits from formatting.

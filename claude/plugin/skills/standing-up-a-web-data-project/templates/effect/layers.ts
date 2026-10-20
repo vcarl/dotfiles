@@ -1,7 +1,7 @@
 // Canonical dependency wiring: bundle service Layers, then inject at the run boundary.
 // Copy into your app's entry package (e.g. apps/<app>/src/), not into core.
 //
-// House style (see ../effect-conventions.md):
+// Conventions (see ../effect-conventions.md):
 //   - Bundle every service Layer with `Layer.mergeAll`.
 //   - The program asks for TAGS; the bundle satisfies them.
 //   - `Effect.provide(bundle)` injects implementations at the single run boundary.

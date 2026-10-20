@@ -1,28 +1,29 @@
 # Effect-TS conventions
 
-Drop this into a new project's `docs/` (or fold it into the project's `CLAUDE.md`). It is the
-blessed Effect-TS house style, distilled from the `roci` reference implementation. The companion
-code stubs live next to this file under `effect/` — copy them into `src/` as starting points.
+Drop this into a new project's `docs/` (or fold it into the project's `CLAUDE.md`). It follows
+Effect's own idioms (Effect 4); where this doc and Effect's documentation disagree, Effect wins. The
+companion code stubs live next to this file under `effect/` — copy them into `src/` as starting points.
 
 The one rule everything else serves: **errors, dependencies, and async all flow through Effect's
 typed channels — never through `throw`, ambient imports, or bare Promises.** Enforce it with
-`@effect/language-service` at error severity, not a hand-rolled ESLint ban list — `floatingEffect`,
+the Effect language service (`@effect/tsgo` on TypeScript 7+, `@effect/language-service` on TS ≤6)
+at error severity, not a hand-rolled ESLint ban list — `floatingEffect`,
 `tryCatchInEffectGen`, `asyncFunction`, and `newPromise` catch exactly this, and the
 `*InEffect`-scoped globals (`globalConsoleInEffect`, `globalFetchInEffect`, etc.) flag stray
 `console`/`fetch` only where they're actually inside Effect context, which is far better signal
 than their unscoped twins (see the parent skill's "factory conventions").
 
-## Services are `Context.Tag` classes with Layers
+## Services are `Context.Service` classes with Layers
 
 A service is an interface of `readonly` methods that each return an `Effect`. Define it as a class
-extending `Context.Tag`, and provide an implementation as a `Layer`. This is the unit of dependency
+extending `Context.Service` (Effect 4; v3's `Context.Tag` and `Effect.Service` are gone), and provide an implementation as a `Layer`. This is the unit of dependency
 injection — consumers depend on the *tag*, never on a concrete module.
 
 ```ts
 import { Context, Effect, Layer } from "effect"
 import { ModelError } from "./errors.js"
 
-export class ModelClient extends Context.Tag("ModelClient")<
+export class ModelClient extends Context.Service<
   ModelClient,
   {
     readonly complete: (
@@ -30,13 +31,13 @@ export class ModelClient extends Context.Tag("ModelClient")<
       messages: ChatMessage[],
     ) => Effect.Effect<CompletionResult, ModelError>
   }
->() {}
+>()("ModelClient") {}
 
 // Implementation, wired as a Layer:
 export const ModelClientLive = Layer.succeed(ModelClient, ModelClient.of({ complete }))
 ```
 
-- `Context.Tag("ModelClient")` — the string is the tag's runtime identity; keep it equal to the class name.
+- `Context.Service<Self, Shape>()("ModelClient")` — the string is the service's runtime identity; keep it equal to the class name.
 - The second type param is the **service shape**: an object of `readonly` methods returning `Effect.Effect<A, E>`.
 - `Layer.succeed(Tag, Tag.of({ ...methods }))` for a static implementation. Use `Layer.effect` when the
   implementation must itself run an Effect to build (e.g. it depends on other services or resources).
@@ -45,43 +46,43 @@ export const ModelClientLive = Layer.succeed(ModelClient, ModelClient.of({ compl
 
 ## Errors are tagged classes — descriptive and fail-fast
 
-Every failure is a typed value in the Effect error channel, not a thrown exception. The house style
-is a hand-written class with a `readonly _tag`, a descriptive `message` getter, an optional `cause`,
-and `toString()`. Hand-writing (rather than `Data.TaggedError`) buys a rich, operator-readable message.
+Every failure is a typed value in the Effect error channel, not a thrown exception. Define errors
+with Effect's own constructors — never hand-roll a class with a `_tag` field:
+
+- **`Schema.TaggedError` (default).** `_tag` is set automatically; the class extends `Error`
+  (stack traces, readable `Cause` output); it is yieldable (`yield* new ModelError({...})` fails
+  the Effect, no `Effect.fail` wrapper); and it is a Schema, so it serves directly as an
+  `HttpApiEndpoint` error, round-trips over the wire, and appears in the OpenAPI spec.
+  `httpApiStatus` in the annotations sets its HTTP status.
+- **`Data.TaggedError`** for errors that stay inside one process and never cross a serialization
+  boundary (no Schema to maintain).
 
 ```ts
-export class ModelError {
-  readonly _tag = "ModelError"
-  readonly tier: CortexTier
-  readonly model: string
-  readonly baseUrl: string
-  readonly reason: string
-  readonly cause?: unknown
+import { Schema } from "effect"
 
-  constructor(fields: ModelErrorFields) {
-    this.tier = fields.tier
-    this.model = fields.model
-    this.baseUrl = fields.baseUrl
-    this.reason = fields.reason
-    this.cause = fields.cause
-  }
-
-  get message(): string {
-    return `Model call failed [tier=${this.tier} model=${this.model} endpoint=${this.baseUrl}]: ${this.reason}`
-  }
-
-  toString(): string {
-    return this.message
+export class ModelError extends Schema.TaggedError<ModelError>()(
+  "ModelError",
+  {
+    model: Schema.String,
+    baseUrl: Schema.String,
+    reason: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+  { httpApiStatus: 502 },
+) {
+  override get message(): string {
+    return `Model call failed [model=${this.model} endpoint=${this.baseUrl}]: ${this.reason}`
   }
 }
 ```
 
+- One error class per distinct failure the caller can act on; recover by tag with
+  `Effect.catchTag` / `catchTags`. Don't fold unrelated failures into one class with a `kind` field.
+- Override `message` only when formatting the fields adds operator context; otherwise leave it.
+
 **Fail-fast and loud.** A missing/unreachable dependency is a config/ops error — surface it
 immediately with full context. Do not silently fall back or retry-forever; there is no automatic
 failover. Carry `cause` so the original error is never lost.
-
-For a terser error with no custom message, `Data.TaggedError("Name")<{ ...fields }>` is an acceptable
-lighter alternative — but prefer the hand-written form whenever the message benefits from formatting.
 
 → stub: [`effect/tagged-error.ts`](effect/tagged-error.ts)
 

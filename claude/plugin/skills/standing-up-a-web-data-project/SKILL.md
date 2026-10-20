@@ -19,25 +19,37 @@ These are cheap now and brutal later. Make each one explicitly and write the cho
 | Decision | Default | Why it can't wait |
 |---|---|---|
 | **Local-first / sync model** | Local store is source of truth via a sync engine (see below) | Optimistic writes, offline, and reactivity touch every read path. Bolting on later means rewriting every component's data access. |
-| **Client↔server type boundary** | **The generation chain** (below): server route/action definitions → generated OpenAPI → generated SDK. Framework loaders/actions are thin wrappers over the SDK and define no types of their own. | A hand-typed boundary rots silently; a generated one breaks the build the instant the server changes. |
+| **Client↔server type boundary** | **The generation chain** (below): Postgres catalog → generated Effect Schemas → `HttpApi` definition → `HttpApiClient`. Framework loaders/actions are thin wrappers over that client and define no types of their own. | A hand-typed boundary rots silently; a generated one breaks the build the instant the server changes. |
 | **Streaming transport** | One blessed path. SSE for AI token streams; a single server-side event stream (Effect `Stream` + bounded queue) for live events. | "How do realtime updates flow?" answered five different ways = useEffect hell. Pick once. |
 | **URL/query-param state** | First-class and typed — RR validated search params or `nuqs`. All filter/sort/selection state lives in the URL. | Deep links and shareable views are free if designed in, painful to add once state is scattered in `useState`. |
-| **Effect static enforcement** | `@effect/language-service` wired and patched into `tsc` at scaffold time (see checklist), not added later | Diagnostics are structural, not stylistic. Measured retrofit onto an existing ~216-file Effect codebase: 2083 violations across 196 files. Free at inception, a triage project after. |
+| **Effect static enforcement** | `@effect/tsgo` (the Effect language service for TypeScript 7) wired and patched into the compiler at scaffold time (see checklist), not added later | Diagnostics are structural, not stylistic. Measured retrofit onto an existing ~216-file Effect codebase: 2083 violations across 196 files. Free at inception, a triage project after. |
 
 ## The generation chain
 
 This is the standard the project is judged against: **one central schema, everything derived.** If you ever hand-roll a type that mirrors a DB or API shape, the factory has failed — stop and fix the chain, don't patch the type.
 
-The chain is **DB-first**. Exactly three artifacts are hand-authored; every other type is generated from the layer above it:
+The chain is **DB-first, and the database carries the semantics.** Migrations are written to hold everything Postgres can express — so it can be generated rather than restated in TypeScript:
+
+- **Refinements** as `CREATE DOMAIN` (e.g. `email`, `positive_int`) and `CHECK` constraints; **enums** as Postgres enums.
+- **The read contract** as views in a dedicated `api` schema. Tables are storage; views are what the API exposes. A table migration that doesn't touch a view doesn't change the API.
+- **Hints and display metadata** as `COMMENT ON` smart tags on columns/views. Comments attach to the object, not its name, so a rename carries them along.
+
+What the DB can't hold is the irreducible hand-authored remainder: **commands** (verbs that touch several tables, enqueue work, check auth), **per-endpoint tagged errors**, streaming endpoints, and the shapes of `jsonb` columns. That is all that stays in TypeScript.
 
 | # | Artifact | Authored / generated |
 |---|---|---|
-| 1 | **Migrations** | Hand-authored — the single source of data-model truth |
-| 2 | DB schema types | Generated — `kysely-codegen` against the migrated DB |
-| 3 | **Domain schemas** (Effect Schema) | Hand-authored, wrapping/refining the generated DB types — never restating them |
-| 4 | **Route/action definitions** | Hand-authored against the domain schemas (Effect `HttpApi` or equivalent) |
-| 5 | OpenAPI spec | Generated from the route definitions |
-| 6 | Client SDK | Generated from the spec |
+| 1 | **Migrations** — tables, domains, enums, checks, `api` views, smart comments | Hand-authored — the single source of data-model truth. Run by `effect/sql`'s `Migrator` (`PgMigrator`): each is a `<id>_<name>.ts` module whose Effect is DDL in a `sql\`…\`` template |
+| 2 | Effect Schema **values** for every table and view | Generated — **Kanel** with a project-owned Effect Schema plugin (no maintained one exists as of 2026; model it on `kanel-zod`). These double as the row schemas for queries — there is no separate query-builder type layer |
+| 3 | **Schema overlays** | Hand-authored, and only for what SQL can't say: brands, `jsonb` shapes, cross-field invariants. Overlays `pipe`/`extend` the generated schemas — never restate fields |
+| 4 | `HttpApi` definition | **Read endpoints generated** from the `api` views; **command endpoints hand-authored** against layers 2–3 |
+| 5 | OpenAPI 3.1 spec | Generated — `OpenApi.fromApi`. For linting, docs, and non-TS consumers; TS clients don't read it |
+| 6 | TS client | **No codegen step** — `HttpApiClient.make(api)` derives the typed client at runtime from the layer-4 definition |
+
+Why Kanel: Effect Schema needs runtime *values*, and type-only generators (e.g. `kysely-codegen`) emit TS types — a schema can't wrap a type, so hand-written domain schemas would be forced to restate every field. Kanel's introspection (`extract-pg-schema`) sees tables, views, enums, domains, and comments.
+
+**Queries: `effect/sql`, no query builder.** Queries are `sql\`…\`` templates run through `SqlSchema.findAll` / `findOne` / `findOneOption` with the generated layer-2 schemas as `Result`, so every row is decoded against the chain. Transactions (`withTransaction`), `SqlError`, tracing, batching (`SqlResolver`), and streaming (`SqlStream`) are native — nothing to wrap. The tradeoff, taken deliberately: column names inside SQL text aren't compile-checked. Generated read endpoints take their columns from the schemas, so the exposure is hand-written command SQL — a small surface where a typo fails loudly (Postgres error or row-decode failure) on the QA skill's data round-trip. **Escape hatch:** a project dominated by hand-built dynamic SQL (search/report builders composing many optional joins) can bring in **Kysely** for those modules, wrapped in a `Context.Service` via `Effect.tryPromise` (`@effect/sql-kysely` is Effect 3-only).
+
+**Postgres only.** The chain depends on catalog metadata SQLite doesn't have (no domains, no enum types, no stored comments).
 
 Each generation step is a task-graph target gated on its upstream (`^build`), never a manual command. The proof the chain works: change a migration and a type error surfaces in the client **in the same PR** — no step in between requires a human to remember anything.
 
@@ -48,9 +60,10 @@ Each generation step is a task-graph target gated on its upstream (`^build`), ne
 Server-authored hints tell a generated client what a value *is* and what it can *do next*. Reference implementation: `~/workspace/gameserver` (Go producer; `internal/openapi/schema_registry.go`) with TypeScript consumer `~/workspace/spacemolt-lib`. The rules that port:
 
 - **Hints are OpenAPI vendor extensions (`x-*`), not a runtime HATEOAS envelope.** Two families: schema-level (`x-display`: id/label/primary columns, `next_actions` templates with `{field}` placeholders resolved per row) and operation-level (`x-is-mutation`-style cost/effect flags).
-- **The knowledge lives on the type, never in a name-keyed side table.** The reference started with a central name→hint map; its field-name strings silently orphaned on rename and it was replaced with per-type derivation. Our carrier is Effect Schema annotations on the domain schemas (layer 3) — a rename moves or breaks the hint, never orphans it.
+- **The knowledge lives on the type, never in a name-keyed side table.** The reference started with a central name→hint map; its field-name strings silently orphaned on rename and it was replaced with per-type derivation. Our carrier: `COMMENT ON` smart tags on views/columns, which the generator turns into Effect Schema annotations on the layer-2 schemas; hints on hand-authored commands are annotations set directly. A rename moves or breaks the hint, never orphans it.
+- **Getting hints into the spec:** operation-level `x-*` via `.annotate(OpenApi.Override, { "x-…": … })` on the endpoint/group; schema-level `x-*` via an `OpenApi.Transform` that patches `components.schemas` (Effect 4 removed the v3 `jsonSchema` annotation; its `toJsonSchema` replacement is untested for arbitrary `x-*` keys — try it before preferring it over the Transform).
 - **Three guard tests, day one:** (1) derivation-equality — re-derive each hint and byte-diff against what the served spec carries; (2) every field name a hint references is a real property of its component; (3) every `next_action` resolves to a real endpoint + params in the same document (the test the reference never wrote).
-- **Budget a custom pass in SDK generation.** Off-the-shelf OpenAPI generators silently drop unknown `x-*` keys — only `discriminator` survives the standard toolchain. The SDK build re-parses the raw spec to recover hints, cross-referencing the generator's output only for type names.
+- **TS consumers read hints off the schemas, not the spec.** `HttpApiClient` is built from the same `HttpApi` value, so annotations are readable at runtime with `Schema.resolveAnnotations` / `SchemaAST.resolveAt` (type custom keys by augmenting `Schema.Annotations.Annotations`; payload schemas are `Option`-wrapped and may sit inside a transformation/`Union` — walk to the right AST node). **Only a generated non-TS client needs a custom pass:** off-the-shelf OpenAPI generators silently drop unknown `x-*` keys (only `discriminator` survives), so that build re-parses the raw spec to recover hints, cross-referencing the generator's output only for type names.
 - **Define `{field}` resolution semantics — including the absent-field case — before shipping.** The reference left it as a doc comment repeated across 39 implementations with no defined answer.
 - **Emission ≠ adoption.** A hint earns its keep by acquiring consumers: the reference's mutation flag drives SDK return types, runtime dispatch, and a semver gate (a query↔mutation flip is a major bump); its positional-index hint reached the SDK's catalog and is read by nothing. Ship each hint with at least one consumer or a written deferral.
 
@@ -60,17 +73,18 @@ Distilled from the house style across the reference implementations plus current
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Language | TypeScript (strict) + **Effect-TS** | Effect for errors / DI / service layers. `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` on. Wire **`@effect/language-service`** day-1 (see `Build / lint / test` row) — retrofitting it onto a mature codebase is a multi-thousand-violation triage project. House style + copy-in stubs: **`templates/effect-conventions.md`** and **`templates/effect/`** (distilled from `roci`). |
-| App framework | **React Router v8, framework mode** (default, not a commitment) | The framework is downstream of the generation chain: any framework qualifies iff its server seam consumes the generated SDK rather than defining its own types. Floors: Node 22.22+, React 19.2.7+, Vite 7+, ESM-only. Not Next for a SPA/dashboard. |
+| Language | **TypeScript 7** (strict, the native compiler) + **Effect 4** | Effect for errors / DI / service layers. Effect 4 folds Schema, SQL, HTTP, and `HttpApi` into the core `effect` package (`effect/schema`, `effect/sql`, `effect/http`, `effect/http-api`); `@effect/platform` is the v3 line — don't install it. Companions: `@effect/sql-pg`, `@effect/platform-node`. `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` on. Wire **`@effect/tsgo`** day-1 (see `Build / lint / test` row) — retrofitting it onto a mature codebase is a multi-thousand-violation triage project. House style + copy-in stubs: **`templates/effect-conventions.md`** and **`templates/effect/`** (distilled from `roci`). |
+| App framework | **React Router v8, framework mode** (default, not a commitment) | The framework is downstream of the generation chain: any framework qualifies iff its server seam consumes the `HttpApiClient` rather than defining its own types. Floors: Node 24 LTS (24.22+), React 19.3+, Vite 8+, ESM-only. Not Next for a SPA/dashboard. |
 | Server-state seam | Route loaders/actions; **TanStack Query** for non-route server calls | The sync engine's local store is the *primary* read path; Query covers the rest. |
 | Local store / sync | **Zero** (Rocicorp) by default | Best web DX + native multi-user realtime. Alternates: **ElectricSQL** (Postgres-centric), **PowerSync** (most mature, mobile). Avoid Triplit (community-maintained since 2025). |
 | Memoization | **React Compiler v1.0** (enabled) | Stable since Oct 2025. Drop manual `useMemo`/`useCallback`. |
 | Client state machines | **XState** for highly-interactive surfaces; `zustand` for simple bespoke client state | Model interactive UI (things entering/leaving view, playback, multi-step flows) as a state machine — not chained effects. |
 | Loading / errors | **Suspense + ErrorBoundary** | Not `isPending`/`isError` sprinkled everywhere. |
 | Styling | **Design tokens + a small component library** | An agent-first design system. Not ad-hoc Tailwind class soup — it can't hold consistency at scale. A `tokens.css` + components layer is the seam. |
-| DB + types | SQLite or Postgres + **Kysely, codegen'd types** | Migrations are the root of **The generation chain** (above); DB types are generated (`kysely-codegen`), never authored. Drizzle is acceptable only if its codegen covers the chain equally. |
+| DB + types | **Postgres** + **`effect/sql`** (`@effect/sql-pg`), Effect Schemas via **Kanel** | Migrations are the root of **The generation chain** (above); schemas are generated, never authored. Queries via `SqlSchema` against the generated schemas; migrations via `PgMigrator`. Kysely only as the dynamic-SQL escape hatch (see the chain). Postgres-only because the chain reads domains, enums, and comments from the catalog. |
+| API contract | **Effect `HttpApi`** + **`HttpApiClient`** | Spec via `OpenApi.fromApi` (3.1, JSON, committed). Non-TS client needed? `@hey-api/openapi-ts` plus the hint-recovery pass — not before. |
 | Package manager | **pnpm** | `packageManager` field pinned; `pnpm-workspace.yaml` for monorepos. |
-| Build / lint / test | **Vite 7, Biome, Vitest** + **`@effect/language-service`** | Biome stays blessed for formatting/syntax. The language-service is a TS-language-service plugin, not a linter — it type-checks Effect usage (floating effects, sync-in-`gen`, unsafe assertions, etc.), so it's orthogonal to Biome, not a replacement. It's editor-only until its `patch` command is run to make `tsc` itself emit the diagnostics (see scaffold checklist). `@effect/eslint-plugin` is effectively dead — don't reach for it. Custom *syntactic* bans (banned imports, banned call patterns) live in **Biome GritQL plugins** — don't resurrect ESLint for those. The moment a custom *type-aware* rule is needed, ESLint + typescript-eslint comes back too — and only then: neither Biome nor oxlint can host type-aware rules. Fail-fast config loading: decode all config at startup so bad input surfaces before work begins. |
+| Build / lint / test | **Vite 8, Biome 2, Vitest 5** + **`@effect/tsgo`** | Biome stays blessed for formatting/syntax. `@effect/tsgo` is the Effect language service for TypeScript 7 (it replaces `@effect/language-service`, which is for TS ≤6 only) — not a linter: it type-checks Effect usage (floating effects, sync-in-`gen`, unsafe assertions, etc.), so it's orthogonal to Biome, not a replacement. It's editor-only until `effect-tsgo patch` is run to make the compiler itself emit the diagnostics (see scaffold checklist). Turn on `outdatedApi` and `obsoleteSchemaImport` to catch Effect 3 leftovers. `@effect/eslint-plugin` is effectively dead — don't reach for it. Custom *syntactic* bans (banned imports, banned call patterns) live in **Biome GritQL plugins** — don't resurrect ESLint for those. The moment a custom *type-aware* rule is needed, ESLint + typescript-eslint comes back too — and only then: neither Biome nor oxlint can host type-aware rules. Fail-fast config loading: decode all config at startup so bad input surfaces before work begins. |
 | E2E / smoke browser | **`Bun.WebView`** (Bun 1.4+), run under `bun` | The blessed driver for the QA skill's "is it basically functional" pass. Native event dispatch (`isTrusted: true`), `evaluate()`, `screenshot()`, built-in wait-for-actionability. On macOS it's the system WKWebView — zero install. Marked **experimental**; see the tooling-runtime section for the boundary and the Playwright escape hatch. |
 | Image / asset pipeline | **`Bun.Image`** (Bun 1.4+) | Replaces `sharp` for build-time asset work — resize/rotate/modulate, `metadata()` without a full decode, `placeholder()` for ThumbHash blur-ups. Zero npm deps, no native addon build step. |
 | PTY / terminal harness | **`Bun.Terminal`** (Bun 1.3.5+) | Replaces `node-pty` for driving the ergonomic launcher, TUIs, or any subprocess that needs a real TTY. No native addon, so no ABI break on every Node bump. POSIX only. |
@@ -101,7 +115,7 @@ Tooling = e2e/smoke scripts, the asset pipeline, PTY harnesses, one-off maintena
 
 ## Monorepo structure
 
-Once a project grows past one deployable — a backend (monolith and/or microservices), a web app, a native app, a UI toolkit, a generated API SDK — put them in one pnpm workspace. A monorepo is **not** a monolith: services stay independently deployable; what they share is *source-level libraries*, not a runtime.
+Once a project grows past one deployable — a backend (monolith and/or microservices), a web app, a native app, a UI toolkit, a shared API contract — put them in one pnpm workspace. A monorepo is **not** a monolith: services stay independently deployable; what they share is *source-level libraries*, not a runtime.
 
 ### The three-bucket layout
 
@@ -111,7 +125,7 @@ The rule that keeps it sane: all dependency arrows point *into* `packages/`.
 |---|---|---|
 | **`apps/*`** | Things a human uses: web, native (`mobile`), admin. | Deployed, never imported by anything. |
 | **`services/*`** | Things a machine calls: the monolith + each microservice + gateway. | Deployed. Talk to each other over the network, **never** by importing each other's source. |
-| **`packages/*`** | Never-deployed shared libs: `ui`, `api-sdk`, `api-contract`, `core` (domain types/Effect Schema), `config` (eslint/tsconfig presets), `observability`. | Imported only. `"private": true`, no version numbers. |
+| **`packages/*`** | Never-deployed shared libs: `ui`, `db-schema` (generated), `api-contract`, `core` (schema overlays, shared domain logic), `config` (eslint/tsconfig presets), `observability`. | Imported only. `"private": true`, no version numbers. |
 
 The monolith is just a bigger `services/*` peer. Splitting a microservice out later = `mkdir services/foo`, move code — no repo migration.
 
@@ -125,22 +139,22 @@ The monolith is just a bigger `services/*` peer. Splitting a microservice out la
 
 pnpm answers *how packages install and link*; **Nx** answers *how tasks run fast and in the right order* — the task graph, `nx affected` (build/test only what a diff touches), code generators, and **module-boundary enforcement** (the thing that stops `apps/` importing `apps/`, or a service importing another service's source). This matches the `roci` reference (Nx + Effect-TS DI, domain-as-plugin). **Turborepo** is the lighter alternative for a small JS/TS-only repo that just needs caching + task ordering and no generators/boundaries — start there only if Nx is overkill, and graduate to Nx as the platform needs appear.
 
-### The generated-SDK pattern (the payoff)
+### The shared-contract pattern (the payoff)
 
-This is **The generation chain** mapped onto workspace packages — and the single biggest reason a project with a generated API client wants a monorepo:
+This is **The generation chain** mapped onto workspace packages — and the single biggest reason a project with a typed API boundary wants a monorepo:
 
-- **`packages/api-contract`** holds chain layers 4–5: the route/action definitions and the OpenAPI spec generated from them.
-- **`packages/api-sdk`** is layer 6: a codegen build step that consumes the spec and emits the typed client, including the custom pass that recovers `x-*` hints.
-- **`apps/web`** depends on `@acme/api-sdk` via `workspace:*`.
+- **`packages/db-schema`** holds chain layer 2: the Kanel output (Effect Schemas for tables and views), regenerated from the migrated DB.
+- **`packages/api-contract`** holds layers 4–5: the `HttpApi` definition (generated read endpoints + hand-authored commands) and the OpenAPI spec emitted from it. Definitions only — handler implementations live in `services/*`, so nothing server-side leaks into client bundles.
+- **`apps/web`** depends on `@acme/api-contract` via `workspace:*` and calls `HttpApiClient.make(api)`. There is no SDK package; add `packages/api-sdk` only when a non-TS consumer needs a generated client.
 
-Wire the order into the task graph (Nx `dependsOn` / `^build`), never run generators by hand. When an endpoint changes, `contract → sdk → web` rebuilds and the web app gets a **type error in the same PR** if it's using the endpoint wrong. **Commit** the generated SDK (`api-sdk/src/generated.ts`) — reviewable diffs, simpler CI.
+Wire the order into the task graph (Nx `dependsOn` / `^build`), never run generators by hand. When a migration or endpoint changes, `db-schema → api-contract → web` rebuilds and the web app gets a **type error in the same PR** if it's using the endpoint wrong. **Commit** the generated outputs (Kanel output, `openapi.json`) — reviewable diffs, simpler CI.
 
-**Why this must be one workspace:** the strongest argument is a failure observed in the wild. The `gameserver` reference runs this exact chain across two repos, syncing the spec to its SDK on a 30-minute cron. The sync job's typecheck gate began failing — correctly, loudly — and nobody was watching: the loop stayed wedged for weeks while seven server releases shipped past it, silently voiding every hint added upstream. A gate nobody watches doesn't hold the line; it wedges. In one workspace the loop is structural — the schema change that breaks the SDK fails the PR that made it, not a background job. If a polyrepo consumer is ever unavoidable, alert on the sync job *failing*, not just run it on a schedule.
+**Why this must be one workspace:** the strongest argument is a failure observed in the wild. The `gameserver` reference runs this exact chain across two repos, syncing the spec to its SDK on a 30-minute cron. The sync job's typecheck gate began failing — correctly, loudly — and nobody was watching: the loop stayed wedged for weeks while seven server releases shipped past it, silently voiding every hint added upstream. A gate nobody watches doesn't hold the line; it wedges. In one workspace the loop is structural — the schema change that breaks the client fails the PR that made it, not a background job. If a polyrepo consumer is ever unavoidable, alert on the sync job *failing*, not just run it on a schedule.
 
 ### Microservices + monolith specifics
 
 - They coexist as peers under `services/*`, each with its own `Dockerfile` and deps. Putting them in one repo does **not** couple them at runtime.
-- They communicate over the network (HTTP/gRPC/queues). If one needs another, it uses `@acme/api-sdk` — same as the web app. Never `import` across a service boundary; that re-introduces the coupling microservices exist to avoid.
+- They communicate over the network (HTTP/gRPC/queues). If one needs another, it builds an `HttpApiClient` from `@acme/api-contract` — same as the web app. Never `import` across a service boundary; that re-introduces the coupling microservices exist to avoid.
 - Shared concerns (`@acme/core` types, `@acme/observability` logging/tracing) live in `packages/*` — a fix ships to every service in one PR.
 - Deploy one service in isolation with `pnpm deploy --filter=payments` (produces a self-contained subtree with workspace deps flattened in — no monorepo baggage in the image). CI runs `nx affected` so a one-line change to `payments` doesn't rebuild the web app.
 
@@ -154,7 +168,7 @@ Internal `packages/*` and `services/*` stay `"private": true` with no version nu
 |---|---|
 | React Native / Metro choking on pnpm's symlinked `node_modules` | Set `node-linker=hoisted` in the mobile app's `.npmrc` (or `nodeLinker` tweak). Verify early if native is in scope — this is where pnpm strictness bites. |
 | `apps/` importing `apps/`, or services importing each other's source | Enforce with Nx module-boundary rules (built in). Don't rely on discipline. |
-| Generated SDK drifting from the contract | Codegen is a task-graph step gated on `^build`, never a manual command. |
+| Generated schemas or spec drifting from the DB | Codegen is a task-graph step gated on `^build`, never a manual command. |
 
 ## The factory conventions (copy these into every project)
 
@@ -163,7 +177,7 @@ These are what make the reference projects pleasant to work in:
 - **A per-project `.claude/skills/` QA skill** that stands up the app cold and confirms it's "basically functional" — the surface real unit tests mock out (CLI/server boots, config resolves, data round-trips, the webapp renders). Author this skill alongside the app, not after. The "webapp renders" half is a `Bun.WebView` script run under `bun` (see **Bun as the tooling runtime**): navigate, `evaluate()` a couple of assertions, `screenshot()` for the diff. Keep it a separate process from the Vitest suite — it's a different runtime.
 - **An ergonomic launcher** (`./bench`-style executable) instead of long `npm run` paths. If it drives anything interactive, `Bun.Terminal` gives it a real TTY without a native addon.
 - **Pre-commit that only touches staged files** — format staged files, re-stage only those, leave unstaged edits untouched.
-- **`@effect/language-service` at error severity enforces the discipline off-the-shelf** — `floatingEffect`, `tryCatchInEffectGen`, `asyncFunction`, `newPromise`, and the `*InEffect`-scoped global bans (`globalConsoleInEffect`, `globalFetchInEffect`, etc. — prefer these over their unscoped twins, far better signal) so the Effect error channel is actually used. Don't hand-roll this as an ESLint ban list.
+- **`@effect/tsgo` at error severity enforces the discipline off-the-shelf** — `floatingEffect`, `tryCatchInEffectGen`, `asyncFunction`, `newPromise`, and the `*InEffect`-scoped global bans (`globalConsoleInEffect`, `globalFetchInEffect`, etc. — prefer these over their unscoped twins, far better signal) so the Effect error channel is actually used. Don't hand-roll this as an ESLint ban list.
 - **Immutable, resumable data writes** — header-open → append → finalize-once, so an interrupted run is detectable and never corrupts.
 - **A CI infra-lint job** — `shellcheck` on every script (the ergonomic launcher included) and `hadolint` on every Dockerfile. Minutes to wire; catches the "worked locally, broke in the container" class before it ships.
 
@@ -179,10 +193,10 @@ These are what make the reference projects pleasant to work in:
 
 ## Scaffold checklist
 
-1. `git init`, then `git commit --allow-empty -m 'initial commit'` — a blank root commit gives you a consistent parent that survives later dramatic squashes. Then use **pnpm** (set the `packageManager` field; if more than one deployable, lay down the workspace per **Monorepo structure** above — `pnpm-workspace.yaml`, `apps/`+`services/`+`packages/`, Nx); set `engines` (Node 22.22+) and `.nvmrc`.
-2. Strict `tsconfig` — add `"plugins": [{"name": "@effect/language-service"}]` — Biome, Vitest, Husky pre-commit (staged-only). The tsconfig entry alone is editor-only squiggles; run the language-service's `patch` command and wire it into a `prepare`/`postinstall` script so it re-patches `node_modules/typescript` after every `npm ci` — skip this and CI silently enforces nothing. Copy `templates/effect-conventions.md` into the project's `docs/` (or fold into `CLAUDE.md`); seed `src/` from the `templates/effect/` stubs (service tag, tagged error, layer wiring).
+1. `git init`, then `git commit --allow-empty -m 'initial commit'` — a blank root commit gives you a consistent parent that survives later dramatic squashes. Then use **pnpm** (set the `packageManager` field; if more than one deployable, lay down the workspace per **Monorepo structure** above — `pnpm-workspace.yaml`, `apps/`+`services/`+`packages/`, Nx); set `engines` (Node 24.22+, current LTS) and `.nvmrc`.
+2. Strict `tsconfig` on TypeScript 7 — run `npx @effect/tsgo setup` (adds the dep and the `"plugins": [{"name": "@effect/language-service"}]` tsconfig entry; several of the diagnostics above default off or to suggestion, so set their severities explicitly) — Biome, Vitest, Husky pre-commit (staged-only). The tsconfig entry alone is editor-only squiggles; wire `effect-tsgo patch` into a `prepare`/`postinstall` script so it re-patches the compiler after every install — skip this and CI silently enforces nothing. Copy `templates/effect-conventions.md` into the project's `docs/` (or fold into `CLAUDE.md`); seed `src/` from the `templates/effect/` stubs (service tag, tagged error, layer wiring).
 3. Scaffold **React Router v8 framework mode**; enable **React Compiler**.
-4. Stand up the **DB + migrations**; wire **the full generation chain** end-to-end (DB types → domain schemas → routes → OpenAPI → SDK) as task-graph targets, and prove it — change a migration, watch the type error surface in the client. Fail-fast config loading.
+4. Stand up **Postgres + `PgMigrator` migrations** (with an `api` schema of views from the first migration); wire **the full generation chain** end-to-end (Kanel → Effect Schemas → `SqlSchema` queries + `HttpApi` → OpenAPI + `HttpApiClient`) as task-graph targets, and prove it — change a migration, watch the type error surface in the client. Fail-fast config loading.
 5. Choose and integrate the **sync engine** (Zero default); build the single data module with client-generated IDs.
 6. Decide the **streaming transport**; wire the one blessed path.
 7. Lay down **design tokens + component lib**; typed URL search-param state.
